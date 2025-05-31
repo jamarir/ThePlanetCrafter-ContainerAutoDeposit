@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine.InputSystem;
 using BepInEx;
 using BepInEx.Logging;
@@ -34,17 +34,22 @@ namespace TPCMod
             [HarmonyPatch(typeof(SpaceCraft.InventoriesHandler), "TransferAllItems")]
             static void Prefix_SpaceCraftInventoriesHandlerTransferAllItems(SpaceCraft.InventoriesHandler __instance, Inventory fromInventory, Inventory toInventory)
             {
-                // Checking if the MoveAll button pressed is associated with the left inventory (the player's).
-                DataConfig.UiType openedUi = Managers.GetManager<WindowsHandler>().GetOpenedUi();
-                var window = (UiWindowContainer)Managers.GetManager<WindowsHandler>().GetWindowViaUiId(openedUi);
-                var _inventoryLeft = (Inventory)AccessTools.Field(window.GetType(), "_inventoryLeft").GetValue(window);
-
-                // Toggle the patch trigger accordingly.
-                if (Keyboard.current.leftCtrlKey.isPressed && fromInventory == _inventoryLeft)
+                // Interstellar Travel provokes a NULL reference. Easy fix with a try-catch (credit to Lansat: https://www.nexusmods.com/planetcrafter/mods/121?tab=posts).
+                try
                 {
-                    Patch.performAutoDeposit = true;
+                    // Checking if the MoveAll button pressed is associated with the left inventory (the player's).
+                    DataConfig.UiType openedUi = Managers.GetManager<WindowsHandler>().GetOpenedUi();
+                    var window = (UiWindowContainer)Managers.GetManager<WindowsHandler>().GetWindowViaUiId(openedUi);
+                    var _inventoryLeft = (Inventory)AccessTools.Field(window.GetType(), "_inventoryLeft").GetValue(window);
+
+                    // Toggle the patch trigger accordingly.
+                    if (Keyboard.current.leftCtrlKey.isPressed && fromInventory == _inventoryLeft)
+                    {
+                        Patch.performAutoDeposit = true;
+                    }
+                    //Log.LogInfo($"trigger: {Patch.performAutoDeposit}");
                 }
-                //Log.LogInfo($"trigger: {Patch.performAutoDeposit}");
+                catch { }
             }
 
             // The method transfering stuff is "SpaceCraft.InventoriesHandler.TransferAllItemsServerRpc()". The exact condition looked after is: "if (inventoryById2.AddItem(worldObject))", after which the item is added into the destination container. So we'll patch that AddItem() conditional result (prefix) if we're in a patch scenario.
