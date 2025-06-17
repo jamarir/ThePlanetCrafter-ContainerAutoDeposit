@@ -4,6 +4,9 @@ using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
 using SpaceCraft;
+using Unity.Netcode;
+using System.Runtime.CompilerServices;
+using UnityEngine;
 
 namespace TPCMod
 {
@@ -22,13 +25,36 @@ namespace TPCMod
             Log = base.Logger;
             Log.LogInfo($"Plugin {PLUGIN_GUID} is loaded!");
             (new Harmony(PLUGIN_GUID)).PatchAll();
+
+            var persistObj = new GameObject("PerformAutoDepositObj");
+            DontDestroyOnLoad(persistObj);
+            var netObj = persistObj.AddComponent<NetworkObject>();
+            var behaviour = persistObj.AddComponent<PerformAutoDepositBehaviour>();
+            this.gameObject.AddComponent<PerformAutoDepositBehaviour>();
+        }
+
+        public class PerformAutoDepositBehaviour : NetworkBehaviour {
+            public static PerformAutoDepositBehaviour Instance;
+
+            public bool performAutoDeposit = false;
+
+            public override void OnNetworkSpawn()
+            {
+                base.OnNetworkSpawn();
+                Log.LogError("New PerformAutoDepositBehaviour initialized");
+                Instance = this;
+            }
+
+            [Rpc(SendTo.Everyone)]
+            public void SetPerformAutoDeposit(bool value)
+            {
+                this.performAutoDeposit = value;
+            }
         }
 
         [HarmonyPatch]
         class Patch
         {
-            public static bool performAutoDeposit = false;
-
             // Prefix Hook the "SpaceCraft.InventoriesHandler.TransferAllItems()" function to check whether LCTRL + left MoveAll button is pressed.
             [HarmonyPrefix]
             [HarmonyPatch(typeof(SpaceCraft.InventoriesHandler), "TransferAllItems")]
@@ -40,12 +66,13 @@ namespace TPCMod
                     // Checking if the MoveAll button pressed is associated with the left inventory (the player's).
                     DataConfig.UiType openedUi = Managers.GetManager<WindowsHandler>().GetOpenedUi();
                     var window = (UiWindowContainer)Managers.GetManager<WindowsHandler>().GetWindowViaUiId(openedUi);
-                    var _inventoryLeft = (Inventory)AccessTools.Field(window.GetType(), "_inventoryLeft").GetValue(window);
+                    var _inventoryLeft = window._inventoryLeft;
 
                     // Toggle the patch trigger accordingly.
                     if (Keyboard.current.leftCtrlKey.isPressed && fromInventory == _inventoryLeft)
                     {
-                        Patch.performAutoDeposit = true;
+                        var autoDepositBehaviour = PerformAutoDepositBehaviour.Instance;
+                        autoDepositBehaviour?.SetPerformAutoDeposit(true);
                     }
                     //Log.LogInfo($"trigger: {Patch.performAutoDeposit}");
                 }
@@ -57,8 +84,9 @@ namespace TPCMod
             [HarmonyPatch(typeof(SpaceCraft.Inventory), "AddItem")]
             static bool Prefix_SpaceCraftInventoryAddItem(SpaceCraft.Inventory __instance, WorldObject worldObject)
             {
+                var autoDepositBehaviour = PerformAutoDepositBehaviour.Instance;
                 // If we're in a patching scenario, we'll add the condition that the player's item must be in container's inventory.
-                if (Patch.performAutoDeposit)
+                if (autoDepositBehaviour && autoDepositBehaviour.performAutoDeposit)
                 {
                     // For each item in the destination container, we check if its WorlObject's Group Id (e.g. Magnesium, ice, Silicon, Cobalt, Titanium, etc.) is identical to the player's item.
                     //  __instance is the destination container, and worldObject is the player's item to be deposited here.
@@ -83,7 +111,7 @@ namespace TPCMod
             [HarmonyPatch(typeof(SpaceCraft.InventoriesHandler), "TransferAllItems")]
             static void Postfix_SpaceCraftInventoriesHandlerTransferAllItems()
             {
-                Patch.performAutoDeposit = false;
+                PerformAutoDepositBehaviour.Instance?.SetPerformAutoDeposit(false);
             }
         }
     }
